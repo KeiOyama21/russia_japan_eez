@@ -49,6 +49,8 @@ spark_conn <-spark_connect(master = "local",  config = conf)
 ```
 
 
+
+
 ```{r}
 dat_area_segs_daily_WE_2018 <- spark_read_parquet( sc = spark_conn, name = "dat_area_segs_daily_WE_2018",
                                     memory = FALSE,  # memory unload  faster to readl for parquest
@@ -107,6 +109,41 @@ list_country_codes <- spark_read_csv(path = "~/Google Drive/Shared drives/gakuLa
 ```
 
 
+```{r}
+library(bigrquery)
+# プロジェクト名を指定
+projectid = "fish-database-275116"
+# 引っ張ってくるテーブルを指定
+sql <- "SELECT * FROM `fish-database-275116.GFW_Data.big_area_segs` where ssvid like '440%'or ssvid like'441%'"
+# クエリの実行および取得データをtibbleとして保存
+tb <- bq_project_query(projectid, sql)
+# テーブルをダウンロード
+segs_korea <- bq_table_download(tb) %>% 
+  distinct() %>% 
+  arrange(seg_id)
+```
+```{r}
+# プロジェクト名を指定
+projectid = "fish-database-275116"
+# 引っ張ってくるテーブルを指定
+sql <- "SELECT * FROM `fish-database-275116.GFW_Data.big_area_segs` where ssvid like '273%'"
+# クエリの実行および取得データをtibbleとして保存
+tb_2 <- bq_project_query(projectid, sql)
+# テーブルをダウンロード
+segs_korea_russia_japan <- bq_table_download(tb_2)
+```
+```{r}
+# プロジェクト名を指定
+projectid = "fish-database-275116"
+# 引っ張ってくるテーブルを指定
+sql_3 <- "SELECT ssvid, year, best_flag, best_vessel_class, best_tonnage_gt FROM `fish-database-275116.GFW_Data.vessel_list_gfw` where ssvid like '273%'"
+# クエリの実行および取得データをtibbleとして保存
+tb_3 <- bq_project_query(projectid, sql_3)
+# テーブルをダウンロード
+segs_russia_vessel_type <- bq_table_download(tb_3)
+```
+
+
 
 
 #日本でフィルタリングはできるがロシアをどうするのか
@@ -130,7 +167,7 @@ russia_eez_japan_2018 <- dat_area_segs_daily_WE_2018 %>%
   # dat_sonota_joined を first_timestamp で結合
   left_join(dat_sonota_joined, by = c("first_timestamp", "seg_id")) %>% 
   # territory1 が "Japan" の行のみフィルタ
-  filter(eez_id == 8487 & reporting_name == "Japanese Exclusive Economic Zone", ) %>% 
+  filter(eez_id == 8487 & reporting_name == "Japanese Exclusive Economic Zone",fishing_hours > 0 ) %>% 
   #select(seg_id, ssvid, first_timestamp, eez_id, reporting_name) %>% 
    mutate(avg_lon = substring_index(avg_lat_lon, " ", 1),#avg_lat_lonをavg_lon,avg_latに分ける
           avg_lat = substring_index(avg_lat_lon, " ", -1),
@@ -153,9 +190,9 @@ russia_eez_japan_2018 <- dat_area_segs_daily_WE_2018 %>%
 
 
 
-#韓国のeezでフィルタリング
-```{r}
 
+```{r}
+#韓国のeezでフィルタリング
 russia_eez_japan_korea_2018 <- dat_area_segs_daily_WE_2018 %>%
   mutate(country_code = as.integer(floor(ssvid/1000000)))  %>%  　　# ssvidから国コード生成
   left_join(list_country_codes, by = c("country_code" = "code" )) %>%
@@ -163,7 +200,7 @@ russia_eez_japan_korea_2018 <- dat_area_segs_daily_WE_2018 %>%
   # dat_sonota_joined を first_timestamp で結合
   left_join(dat_sonota_joined, by = c("first_timestamp", "seg_id")) %>% 
   # territory1 が "Japan" の行のみフィルタ
-  filter(eez_id == 8328 ) %>% 
+  filter(eez_id == 8328 , fishing_hours > 0) %>% 
   #select(seg_id, ssvid, first_timestamp, eez_id, reporting_name) %>% 
    mutate(avg_lon = substring_index(avg_lat_lon, " ", 1),#avg_lat_lonをavg_lon,avg_latに分ける
           avg_lat = substring_index(avg_lat_lon, " ", -1),
@@ -180,7 +217,100 @@ russia_eez_japan_korea_2018 <- dat_area_segs_daily_WE_2018 %>%
           ave_lon_R_2 = round(avg_lon, temp_round_2),　　　# 緯度経度　round
            ave_lat_R_2 = round(avg_lat, temp_round_2)) %>% 
   collect() 
+
+
 ```
+ 
+
+
+```{r}
+russia_trawlers <- segs_russia_vessel_type %>%
+  filter(best_vessel_class %in% "trawlers", best_flag %in% "RUS") 
+
+russia_trawlers_ssvid <-russia_trawlers$ssvid
+```
+
+
+#2018年に日本のEEZに来たロシア船のうち、トロール船に絞る
+```{r}
+
+russia_eez_japan_2018_trwalers <- dat_area_segs_daily_WE_2018 %>%
+  mutate(country_code = as.integer(floor(ssvid/1000000)))  %>%  　　# ssvidから国コード生成
+  left_join(list_country_codes, by = c("country_code" = "code" )) %>%
+  filter(country_code %in% "273", ssvid %in% russia_trawlers_ssvid, fishing_hours > 0) %>% 
+  # dat_sonota_joined を first_timestamp で結合
+  left_join(dat_sonota_joined, by = c("first_timestamp", "seg_id")) %>% 
+  # territory1 が "Japan" の行のみフィルタ
+  filter(eez_id == 8487 & reporting_name == "Japanese Exclusive Economic Zone",fishing_hours > 0 ) %>% 
+  #select(seg_id, ssvid, first_timestamp, eez_id, reporting_name) %>% 
+   mutate(avg_lon = substring_index(avg_lat_lon, " ", 1),#avg_lat_lonをavg_lon,avg_latに分ける
+          avg_lat = substring_index(avg_lat_lon, " ", -1),
+          seg_id_num  = as.numeric(str_sub(seg_id, start = 1L, end = -1L)))%>%
+  mutate(avg_lon =as.numeric(str_sub(avg_lon, start = 7L, end = -1L)),#str_sub:数値で指定して抽出
+            avg_lat =as.numeric(str_sub(avg_lat, start = 1L, end = -2L)) ) %>%
+  mutate (year_st  = substring_index(first_timestamp, "-",1),
+            month_st  = substring_index(substring_index(first_timestamp, "-",2), "-", -1),
+          day_st =  str_sub(substring_index(first_timestamp, "-",3), start =9, end = 10)) %>%
+   mutate(ave_lon_R = round(avg_lon, temp_round_0),　　　# 緯度経度　round
+           ave_lat_R = round(avg_lat, temp_round_0),
+          ave_lon_R_1 = round(avg_lon, temp_round_1),　　　# 緯度経度　round
+           ave_lat_R_1 = round(avg_lat, temp_round_1),
+          ave_lon_R_2 = round(avg_lon, temp_round_2),　　　# 緯度経度　round
+           ave_lat_R_2 = round(avg_lat, temp_round_2)) %>% 
+  collect()
+
+#トロール船に絞ったssvidを用いて、韓国のeezで漁獲しているかを見る # 273399580,273425070,273393850,273527500の4隻
+russia_eez_japan_korea_2018_trwalers <- dat_area_segs_daily_WE_2018 %>%
+  mutate(country_code = as.integer(floor(ssvid/1000000)))  %>%  　　# ssvidから国コード生成
+  left_join(list_country_codes, by = c("country_code" = "code" )) %>%
+  filter(country_code %in% "273", ssvid %in% russia_eez_japan_2018_trwalers$ssvid) %>% 
+  # dat_sonota_joined を first_timestamp で結合
+  left_join(dat_sonota_joined, by = c("first_timestamp", "seg_id")) %>% 
+  # territory1 が "Japan" の行のみフィルタ
+  filter(eez_id == 8328,fishing_hours > 0 ) %>% 
+  #select(seg_id, ssvid, first_timestamp, eez_id, reporting_name) %>% 
+   mutate(avg_lon = substring_index(avg_lat_lon, " ", 1),#avg_lat_lonをavg_lon,avg_latに分ける
+          avg_lat = substring_index(avg_lat_lon, " ", -1),
+          seg_id_num  = as.numeric(str_sub(seg_id, start = 1L, end = -1L)))%>%
+  mutate(avg_lon =as.numeric(str_sub(avg_lon, start = 7L, end = -1L)),#str_sub:数値で指定して抽出
+            avg_lat =as.numeric(str_sub(avg_lat, start = 1L, end = -2L)) ) %>%
+  mutate (year_st  = substring_index(first_timestamp, "-",1),
+            month_st  = substring_index(substring_index(first_timestamp, "-",2), "-", -1),
+          day_st =  str_sub(substring_index(first_timestamp, "-",3), start =9, end = 10)) %>%
+   mutate(ave_lon_R = round(avg_lon, temp_round_0),　　　# 緯度経度　round
+           ave_lat_R = round(avg_lat, temp_round_0),
+          ave_lon_R_1 = round(avg_lon, temp_round_1),　　　# 緯度経度　round
+           ave_lat_R_1 = round(avg_lat, temp_round_1),
+          ave_lon_R_2 = round(avg_lon, temp_round_2),　　　# 緯度経度　round
+           ave_lat_R_2 = round(avg_lat, temp_round_2)) %>% 
+  collect()
+
+print(unique(segs_russia_vessel_type$best_vessel_class))
+print(unique(russia_eez_japan_korea_2018_trwalers$ssvid))
+```
+
+
+```{r}
+# last_timestampに拘らず、segs_dataで韓国のeez(8328)に行っているものでフィルタリングしてみる
+segs_korea_russia_japan_x <- segs_korea_russia_japan %>% 
+  filter(fishing_hours > 0, eez_value %in% c("8328","8487"))
+
+ssvid_korea_value <- unique(segs_korea_russia_japan_x$ssvid)
+
+segs_korea_russia_japan_y <- segs_korea_russia_japan %>% 
+  filter(fishing_hours > 0 ,ssvid %in% ssvid_korea_value) 
+  
+
+
+
+```
+
+```{r}
+
+```
+
+
+
 
 
 #spark終了不用意に走らせると面倒
@@ -195,7 +325,6 @@ russia_eez_japan_korea_2018 <- dat_area_segs_daily_WE_2018 %>%
 ```{r}
 length(unique(russia_eez_japan_2018$ssvid))
 ```
-
 
 
 
@@ -301,6 +430,7 @@ ggplot() +
   theme(legend.position = "none") +  # 凡例を非表示にする
   coord_sf(xlim = c(120, 160), ylim = c(15, 50))  # 日本のEEZ範囲に絞る
 ```
+
 ```{r}
 
 # アジア全体の陸地データを取得
@@ -362,7 +492,7 @@ ggplot() +
 
 #segsデータの読み込み
 ```{r}
-russia_eez_seg_csv <- read.csv("/Users/oyamakei/Desktop/Gakulabwork/big_area_segs_russia.csv")
+russia_eez_seg_csv <- read.csv("/Users/oyamakei/Desktop/russia_japan_eez/big_area_segs_russia.csv")
 ```
 
 ```{r}
@@ -381,14 +511,20 @@ print(common_ssvid_count)
 
 
 ```{r}
-  russia_eez_segs <- russia_eez_seg_csv %>%
-   mutate(
+russia_eez_segs <- russia_eez_seg_csv %>%
+ mutate(
     avg_lat = str_extract(avg_lat_lon, "(?<=POINT\\().*?(?= )") %>% as.numeric(),
     avg_lon = str_extract(avg_lat_lon, "(?<= ).*?(?=\\))") %>% as.numeric()
   )
 
 
-str(russia_eez_seg_csv$avg_lat_lon)
+segs_korea_russia_japan <- segs_korea_russia_japan %>% 
+     mutate(
+    avg_lat = str_extract(avg_lat_lon, "(?<=POINT\\().*?(?= )") %>% as.numeric(),
+    avg_lon = str_extract(avg_lat_lon, "(?<= ).*?(?=\\))") %>% as.numeric()
+  )
+
+
   
 ```
 
@@ -430,19 +566,24 @@ common_count <- length(common_ssvid)
 
 # 結果を出力
 print(common_count)
+print(common_ssvid)
+
+
+
 ```
+
+
 #試しに273390570のsegsでの動向
 ```{r}
-
 is_present <- russia_eez_segs %>% 
   filter(ssvid == 273390570) %>% 
   nrow() > 0 
 
 print(is_present)
+```
 
 
-
-
+```{r}
 check_273390570 <-  russia_eez_segs %>% 
   filter(ssvid == 273390570)
 
@@ -472,7 +613,129 @@ ggplot() +
 
 
 
+#韓国country 440 441
+```{r} 
+russia_eez_segs_cleaned <- russia_eez_segs %>% 
+  unique() %>% 
+  filter(ssvid %in% common_ssvid)
 
+
+# 最後の操業時間が韓国EEZ (8328) で終了したデータをフィルタリング
+filtered_data <- segs_korea_russia_japan %>%
+  filter(eez_value == 8328, avg_lon >= 33.0 & avg_lon <= 38.0, avg_lat >= 124.5 & avg_lat <= 131.0) %>%  # 韓国EEZ (8328) のデータを抽出
+  group_by(ssvid) %>%  # 船ごとにグループ化
+  filter(last_timestamp == max(last_timestamp), fishing_hours > 0) %>%  # 最後の操業時間を抽出
+  ungroup() # グループ解除x 
+  
+# 結果確認
+head(filtered_data)
+
+
+
+filtered_data_sf <- st_as_sf(filtered_data, coords = c("avg_lat", "avg_lon"), crs = 4326)
+
+filtered_data_sf_2 <- st_as_sf(check_ssvid_daily, coords = c("avg_lon", "avg_lat"), crs = 4326)
+
+
+ggplot() +
+  # アジアの陸地を描く
+  geom_sf(data = asia_sf, fill = 'lightgray', color = 'black') +  # アジアの陸地を灰色で描く
+  # ロシアの陸地を描く
+  geom_sf(data = russia_sf, fill = 'lightpink', color = 'black') +  # ロシアの陸地を薄ピンクで描く
+  # 日本のEEZの地図を描く
+  geom_sf(data = eez_sf, fill = 'blue', alpha = 0.3) +  # 日本のEEZを青で描く
+  # 日本の陸地を描く
+  geom_sf(data = land_sf, fill = 'lightgreen', color = 'black') +  # 日本の陸地を緑で描く
+  # ロシア船の操業データを緯度経度でプロット
+  geom_sf(data = filtered_data_sf, aes(color = "red"), size = 0.5) +  # ロシア船の位置を赤でプロット
+  labs(title = "filtered_data_sf") +
+  theme_minimal() +
+  theme(legend.position = "none") +  # 凡例を非表示にする
+  coord_sf(xlim = c(120, 160), ylim = c(20, 50))  # 日本のEEZ範囲に絞る
+
+print(filtered_data$ssvid)
+
+```
+
+```{r}
+
+ggplot() +
+  # アジアの陸地を描く
+  geom_sf(data = asia_sf, fill = 'lightgray', color = 'black') +  # アジアの陸地を灰色で描く
+  # ロシアの陸地を描く
+  geom_sf(data = russia_sf, fill = 'lightpink', color = 'black') +  # ロシアの陸地を薄ピンクで描く
+  # 日本のEEZの地図を描く
+  geom_sf(data = eez_sf, fill = 'blue', alpha = 0.3) +  # 日本のEEZを青で描く
+  # 日本の陸地を描く
+  geom_sf(data = land_sf, fill = 'lightgreen', color = 'black') +  # 日本の陸地を緑で描く
+  # ロシア船の操業データを緯度経度でプロット
+  geom_sf(data = filtered_data_sf_2, aes(color = "red"), size = 0.5) +  # ロシア船の位置を赤でプロット
+  labs(title = "filtered_data_sf") +
+  theme_minimal() +
+  theme(legend.position = "none") +  # 凡例を非表示にする
+  coord_sf(xlim = c(120, 160), ylim = c(20, 50))  # 日本のEEZ範囲に絞る
+```
+
+
+```{r}
+length(unique(filtered_data$ssvid))
+print(unique(filtered_data$ssvid))
+
+korea_last_korea_ssvid <- filtered_data$ssvid
+```
+
+
+
+##韓国と日本のeez両方で操業しているロシア船の数365隻で,最後に韓国に行ってるのは179
+```{r}
+# 共通する ssvid を取得
+common_ssvid_2 <- intersect(common_ssvid, korea_last_korea_ssvid)
+
+# 共通する ssvid の数を取得
+common_count_2 <- length(common_ssvid_2)
+
+# 結果を出力
+print(common_count_2)
+print(common_ssvid_2)
+
+write.csv(common_ssvid_2, "/Users/oyamakei/Desktop/russia_japan_eez/russia_in_japan.csv")
+```
+
+```{r}
+check_ssvid_daily <- russia_eez_japan_2018 %>%
+  filter(russia_eez_japan_2018$ssvid %in% common_ssvid_2, russia_eez_japan_2018$fishing_hours > 0)
+
+
+  
+  
+```
+
+```{r}
+
+
+russia_eez_japan_2018_trwalers_sf <- st_as_sf(russia_eez_japan_2018_trwalers, coords = c("avg_lat", "avg_lon"), crs = 4326)
+
+
+ggplot() +
+  # アジアの陸地を描く
+  geom_sf(data = asia_sf, fill = 'lightgray', color = 'black') +  # アジアの陸地を灰色で描く
+  # ロシアの陸地を描く
+  geom_sf(data = russia_sf, fill = 'lightpink', color = 'black') +  # ロシアの陸地を薄ピンクで描く
+  # 日本のEEZの地図を描く
+  geom_sf(data = eez_sf, fill = 'blue', alpha = 0.3) +  # 日本のEEZを青で描く
+  # 日本の陸地を描く
+  geom_sf(data = land_sf, fill = 'lightgreen', color = 'black') +  # 日本の陸地を緑で描く
+  # ロシア船の操業データを緯度経度でプロット
+  geom_sf(data = filtered_data_sf_2, aes(color = "red"), size = 0.5) +  # ロシア船の位置を赤でプロット
+  labs(title = "filtered_data_sf") +
+  theme_minimal() +
+  theme(legend.position = "none") +  # 凡例を非表示にする
+  coord_sf(xlim = c(120, 160), ylim = c(20, 50))  # 日本のEEZ範囲に絞る
+```
+
+```{r}
+
+```
 
 
 
